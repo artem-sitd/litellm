@@ -198,6 +198,7 @@ impl Sink for OtlpSink {
         let Ok(attributes) = record
             .fields
             .iter()
+            .filter(|(_, value)| !value.is_null())
             .map(|(key, value)| {
                 self.value(Some(key), value)
                     .map(|value| (key.clone(), value))

@@ -311,9 +311,9 @@ def process_state_started() -> bool: ...
 def reserve_process_for_forking() -> None: ...
 
 __all__ = [
-    "NativeDiagnosticLogger",
     "ForkedAfterNativeRuntimeStarted",
     "HuggingFaceEncoding",
+    "NativeDiagnosticLogger",
     "NativeDiagnosticProcessor",
     "NativeTraceConfig",
     "NativeTraceStorage",

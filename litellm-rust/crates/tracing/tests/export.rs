@@ -49,7 +49,7 @@ async fn otlp_exports_owned_redacted_records_after_destination_filtering_and_sam
     .await
     .unwrap();
     let logger = Logger::new(sink.clone());
-    let fields = json!({"logger.name": "LiteLLM", "python.created": 1_700_000_000.5, "extra": {"api_key": "secret123", "nested": [true, 3]}, "exception.stacktrace": "Authorization: Bearer abcdefghijklmnop"}).as_object().unwrap().clone();
+    let fields = json!({"logger.name": "LiteLLM", "python.created": 1_700_000_000.5, "extra": {"api_key": "secret123", "nested": [true, 3]}, "stack": null, "exception.stacktrace": "Authorization: Bearer abcdefghijklmnop"}).as_object().unwrap().clone();
     logger.emit(Level::INFO, "level filtered", fields.clone());
     logger.emit(Level::WARN, "sampled out", fields.clone());
     logger.emit(
@@ -76,6 +76,12 @@ async fn otlp_exports_owned_redacted_records_after_destination_filtering_and_sam
     assert_eq!(logs.len(), 1);
     assert_eq!(logs[0].time_unix_nano, 1_700_000_000_500_000_000);
     assert_eq!(logs[0].severity_number, 17);
+    assert!(
+        !logs[0]
+            .attributes
+            .iter()
+            .any(|attribute| attribute.key == "stack")
+    );
     let Some(any_value::Value::StringValue(message)) = &logs[0].body.as_ref().unwrap().value else {
         panic!("string body")
     };
