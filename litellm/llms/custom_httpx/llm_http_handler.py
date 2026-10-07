@@ -1531,7 +1531,7 @@ class BaseLLMHTTPHandler:
             api_key=api_key,
             headers=headers,
         )
-        sync_httpx_client: Final = client if client is not None else _get_httpx_client()
+        sync_httpx_client: Final = client if client is not None else get_httpx_client()
         try:
             response: Final = sync_httpx_client.post(
                 url, json=data, headers=outbound_headers, timeout=timeout, logging_obj=logging_obj
