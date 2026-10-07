@@ -9,7 +9,10 @@ use litellm_llms_types::{
 };
 use serde_json::{Map, Value, json};
 
-use super::{handler::shape_anthropic_messages_request, thinking::translate_thinking};
+use super::{
+    handler::shape_anthropic_messages_request,
+    thinking::{translate_reasoning_effort, translate_thinking},
+};
 use crate::base_llm::messages::context::MessagesTransformContext;
 use crate::{
     Error,
@@ -22,7 +25,10 @@ use crate::{
     },
     base_llm::{
         auth::AuthScheme,
-        messages::transformation::{BaseMessagesConfig, Headers, ValidatedEnvironment},
+        messages::{
+            normalization::strip_billing_metadata,
+            transformation::{BaseMessagesConfig, Headers, ValidatedEnvironment},
+        },
     },
 };
 
@@ -110,15 +116,63 @@ impl BaseMessagesConfig for AnthropicMessagesConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThinkingSemantics {
+    /// Claude's rules: disabled thinking is dropped, legacy and adaptive thinking and effort
+    /// are rewritten for the model, and a temperature that conflicts with thinking is removed.
+    Anthropic,
+    /// The host reads `thinking` its own way, so only `reasoning_effort` is mapped.
+    Passthrough,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BillingMetadata {
+    Forward,
+    Strip,
+}
+
+/// How an Anthropic-wire host diverges from the first-party request policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RequestPolicy {
+    pub thinking: ThinkingSemantics,
+    pub billing_metadata: BillingMetadata,
+}
+
+pub const FIRST_PARTY_REQUEST_POLICY: RequestPolicy = RequestPolicy {
+    thinking: ThinkingSemantics::Anthropic,
+    billing_metadata: BillingMetadata::Forward,
+};
+
+/// A third-party host that speaks the Anthropic wire format but is not Claude.
+pub const COMPATIBLE_HOST_REQUEST_POLICY: RequestPolicy = RequestPolicy {
+    thinking: ThinkingSemantics::Passthrough,
+    billing_metadata: BillingMetadata::Strip,
+};
+
 pub(crate) fn transform_messages_request(
     request: MessagesRequest,
     context: &MessagesTransformContext,
+) -> Result<MessagesRequest, Error> {
+    transform_messages_request_with(request, context, FIRST_PARTY_REQUEST_POLICY)
+}
+
+pub(crate) fn transform_messages_request_with(
+    request: MessagesRequest,
+    context: &MessagesTransformContext,
+    policy: RequestPolicy,
 ) -> Result<MessagesRequest, Error> {
     if request.params.max_tokens.is_none() {
         return Err(Error::MissingField("max_tokens"));
     }
     let request = drop_unsupported_params(request, context)?;
-    let request = translate_thinking(request, &context.thinking)?;
+    let request = match policy.thinking {
+        ThinkingSemantics::Anthropic => translate_thinking(request, &context.thinking)?,
+        ThinkingSemantics::Passthrough => translate_reasoning_effort(request, &context.thinking)?,
+    };
+    let request = match policy.billing_metadata {
+        BillingMetadata::Forward => request,
+        BillingMetadata::Strip => strip_billing_metadata(request),
+    };
     let context_management = request
         .params
         .context_management
