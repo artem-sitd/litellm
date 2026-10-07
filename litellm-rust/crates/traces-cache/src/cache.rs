@@ -1,7 +1,7 @@
 use std::{future::Future, sync::Arc, time::Duration};
 
 use litellm_traces::{
-    Trace, TraceSummary,
+    SpendMatch, Trace, TraceSummary,
     query::named::{ReadAccessParams, TraceSpansRow},
 };
 use moka::{Expiry, future::Cache};
@@ -67,7 +67,7 @@ pub enum Freshness {
 }
 
 impl Freshness {
-    pub fn of(rows: &[TraceSpansRow], spend_known: bool, snapshot_ms: u64) -> Self {
+    pub fn of(rows: &[TraceSpansRow], trace: &Trace, snapshot_ms: u64) -> Self {
         if rows
             .iter()
             .any(|row| matches!(row.framework.as_str(), "claude-code" | "claude-agent-sdk"))
@@ -82,6 +82,13 @@ impl Freshness {
         let quiet_ms = i64::try_from(snapshot_ms)
             .unwrap_or(i64::MAX)
             .saturating_sub(last_end_ms);
+        let gateway_priced_calls = trace
+            .spans
+            .iter()
+            .filter(|span| span.spend_match == Some(SpendMatch::Matched) && span.spend.is_some())
+            .count() as u64;
+        let spend_known = gateway_priced_calls == trace.summary.llm_calls
+            && (trace.summary.llm_calls == 0 || trace.summary.spend.is_some());
         if spend_known && quiet_ms >= SETTLED_AFTER_MS as i64 {
             Self::Settled
         } else {
@@ -384,17 +391,52 @@ mod tests {
     const LAST_END_MS: u64 = 1_790_742_989_010;
 
     #[rstest]
-    #[case::just_ended(LAST_END_MS, true, Freshness::Live)]
-    #[case::quiet_just_under(LAST_END_MS + SETTLED_AFTER_MS - 1, true, Freshness::Live)]
-    #[case::quiet_long_enough(LAST_END_MS + SETTLED_AFTER_MS, true, Freshness::Settled)]
-    #[case::spend_unknown(LAST_END_MS + SETTLED_AFTER_MS, false, Freshness::Live)]
-    fn freshness_settles_once_spans_stop_and_spend_is_known(
+    #[case::just_ended(LAST_END_MS, Freshness::Live)]
+    #[case::quiet_just_under(LAST_END_MS + SETTLED_AFTER_MS - 1, Freshness::Live)]
+    #[case::quiet_long_enough(LAST_END_MS + SETTLED_AFTER_MS, Freshness::Settled)]
+    fn freshness_settles_traces_without_model_calls_once_spans_stop(
         #[case] snapshot_ms: u64,
-        #[case] spend_known: bool,
         #[case] expected: Freshness,
     ) {
         assert_eq!(
-            Freshness::of(&[row("root")], spend_known, snapshot_ms),
+            Freshness::of(&[row("root")], &trace("root"), snapshot_ms),
+            expected
+        );
+    }
+
+    #[rstest]
+    #[case::catalog_estimate(SpendMatch::NoSpendLog, Freshness::Live)]
+    #[case::gateway_cost(SpendMatch::Matched, Freshness::Settled)]
+    fn priced_summary_requires_gateway_matches_to_settle(
+        #[case] spend_match: SpendMatch,
+        #[case] expected: Freshness,
+    ) {
+        let model = TraceSpansRow {
+            kind: litellm_traces::ObservationType::Llm,
+            ..row("model")
+        };
+        let rows = [model];
+        let original = resolve_trace("trace", "ref", &rows, &[]).unwrap();
+        let trace = Trace {
+            summary: TraceSummary {
+                llm_calls: 1,
+                spend: Some(0.25),
+                priced_calls: 1,
+                ..original.summary
+            },
+            spans: original
+                .spans
+                .into_iter()
+                .map(|span| litellm_traces::Span {
+                    spend: Some(0.25),
+                    spend_match: Some(spend_match),
+                    ..span
+                })
+                .collect(),
+            ..original
+        };
+        assert_eq!(
+            Freshness::of(&rows, &trace, LAST_END_MS + SETTLED_AFTER_MS),
             expected
         );
     }
@@ -408,7 +450,11 @@ mod tests {
             ..row("native")
         };
         assert_eq!(
-            Freshness::of(&[row("root"), native], true, LAST_END_MS + SETTLED_AFTER_MS),
+            Freshness::of(
+                &[row("root"), native],
+                &trace("root"),
+                LAST_END_MS + SETTLED_AFTER_MS,
+            ),
             Freshness::Live
         );
     }
