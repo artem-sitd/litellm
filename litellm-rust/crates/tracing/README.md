@@ -23,6 +23,35 @@ The Python bridge scopes native execution to a sink that uses LiteLLM's existing
 
 Python consumers continue using `litellm._logging` and its existing loggers, filters, formatters, and context setters. Catalog dispatch selects the processing backend for both Python and native diagnostics. The pure `Processor` takes explicit settings and never emits events
 
-A future Node bridge can implement the same sink with runtime-specific delivery and expose the same processor through N-API. Node callback scheduling, queue limits, and shutdown belong in that bridge; this crate has no interpreter handles or output queue
+A future Node bridge can implement the same sink with runtime-specific delivery and expose the same processor through N-API. Node callback scheduling, queue limits, and shutdown belong in that bridge; this crate has no interpreter handles
 
 This is diagnostic logging. Request lifecycle hooks and `CustomLogger` dispatch remain separate
+
+## Configured diagnostic export
+
+The Python host can forward eligible Python records and native events through one shared scoped dispatch while preserving existing Python output. The `posthog` Cargo feature is enabled by default; exporters start only through explicit configuration after worker processes fork
+
+```python
+import os
+import litellm
+from litellm.rust_bridge import forwarding
+
+litellm.rust(True)
+forwarding.configure_posthog(
+    os.environ["POSTHOG_PROJECT_KEY"],
+    sample_rate=0.1,
+)
+forwarding.configure_otlp(
+    os.environ["OTLP_LOGS_ENDPOINT"],
+    name="grafana",
+    headers={"Authorization": os.environ["OTLP_AUTHORIZATION"]},
+)
+```
+
+Call `forwarding.shutdown()` during host shutdown to drain and stop its exporters
+
+Configuration returns `False` when the logger rollout or native binding is unavailable. Named destinations apply independent minimum severities, target prefixes, and sampling. Errors bypass sampling; Python output is unaffected. Default forwarding covers LiteLLM's package, proxy, and router loggers. Pass `loggers=(my_logger,)` to cover another host logger explicitly
+
+OTLP exports log records over HTTP/protobuf to a full logs endpoint. The PostHog SDK captures personless `litellm diagnostic` events, not PostHog Logs or product conversions. Both use SDK batch queues and redact before enqueueing. Flush and shutdown are best effort; they do not guarantee every record was delivered
+
+Read [the shared pipeline notes](../../.agents/skills/rust-tracing/references/unified-python-logging.md) for normalization, rollout, process ownership, and remaining scope

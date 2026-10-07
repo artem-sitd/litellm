@@ -1,4 +1,7 @@
+mod forwarding;
 mod machine;
+
+pub(crate) use forwarding::NativeDiagnosticLogger;
 
 pub(crate) use machine::LoggedMachine;
 
@@ -85,9 +88,7 @@ fn processing_error(_: fancy_regex::Error) -> PyErr {
     PyRuntimeError::new_err("diagnostic processing failed")
 }
 
-struct PythonSink {
-    correlation: (String, String),
-}
+struct PythonSink;
 
 fn level(level: &Level) -> u8 {
     match *level {
@@ -126,6 +127,12 @@ impl Sink for PythonSink {
     }
 
     fn emit(&self, record: &Record) {
+        if record.metadata.target() == "litellm.python" {
+            return;
+        }
+        let mut fields = record.fields.clone();
+        let session = fields.remove("session_id").unwrap_or_default();
+        let trace = fields.remove("trace_id").unwrap_or_default();
         Python::try_attach(|py| {
             report(
                 py,
@@ -139,8 +146,11 @@ impl Sink for PythonSink {
                                 record.metadata.file().unwrap_or_default(),
                                 record.metadata.line().unwrap_or_default(),
                                 record.metadata.target(),
-                                Pythonized(&record.fields),
-                                (&self.correlation.0, &self.correlation.1),
+                                Pythonized(&fields),
+                                (
+                                    session.as_str().unwrap_or_default(),
+                                    trace.as_str().unwrap_or_default(),
+                                ),
                             ),
                         )
                         .map(|_| ())
@@ -155,8 +165,13 @@ pub(crate) fn capture(py: Python<'_>) -> Logger {
         py,
         py.import(MODULE)
             .and_then(|module| module.call_method0("context"))
-            .and_then(|value| value.extract())
-            .map(|correlation| Logger::new(PythonSink { correlation })),
+            .and_then(|value| value.extract::<(String, String)>())
+            .map(|(session, trace)| {
+                forwarding::logger().with_fields(serde_json::Map::from_iter([
+                    ("session_id".to_owned(), session.into()),
+                    ("trace_id".to_owned(), trace.into()),
+                ]))
+            }),
     )
 }
 

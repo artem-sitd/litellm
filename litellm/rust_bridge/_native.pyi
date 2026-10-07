@@ -57,6 +57,29 @@ class NativeTraceStorage:
     def query(self, query: ReadQueryName, parameters: Mapping[str, str | int | float | Sequence[str]]) -> Future[str]: ...
 
 @final
+class NativeDiagnosticLogger:
+    def __new__(cls) -> NativeDiagnosticLogger: ...
+    def emit(self, severity: int, message: str, fields: str) -> None: ...
+    def configure_otlp(
+        self,
+        name: str,
+        endpoint: str,
+        headers: Mapping[str, str],
+        service_name: str,
+        policy: tuple[int, Sequence[str], float],
+    ) -> None: ...
+    def force_flush(self) -> None: ...
+    def shutdown(self) -> None: ...
+    def configure_posthog(
+        self,
+        name: str,
+        api_key: str,
+        host: str,
+        service_name: str,
+        policy: tuple[int, Sequence[str], float],
+    ) -> None: ...
+
+@final
 class NativeDiagnosticProcessor:
     def __new__(cls, minimum_custom_key_length: int) -> NativeDiagnosticProcessor: ...
     def redact_text(self, text: str) -> str: ...
@@ -288,6 +311,7 @@ def process_state_started() -> bool: ...
 def reserve_process_for_forking() -> None: ...
 
 __all__ = [
+    "NativeDiagnosticLogger",
     "ForkedAfterNativeRuntimeStarted",
     "HuggingFaceEncoding",
     "NativeDiagnosticProcessor",
