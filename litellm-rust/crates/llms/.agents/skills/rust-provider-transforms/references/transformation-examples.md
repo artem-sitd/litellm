@@ -1,7 +1,5 @@
 # structure
 
-These examples cover the complete Messages stack. Some provider implementations and test ports land after the shared contracts; inspect the current branch before assuming support
-
 Paths below are relative to the repository root
 
 The base OCR and Mistral OCR pairs are the layout reference. Keep corresponding operation and parameter names when responsibilities match, using Rust acronym casing: `BaseOCRConfig` becomes `BaseOcrConfig`. Private Python helpers may drop the leading underscore. Give Rust helpers responsibility names rather than duplicating trait method names

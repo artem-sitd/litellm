@@ -1,7 +1,5 @@
 # structure
 
-These examples cover the complete Messages stack. Some provider implementations and test ports land after the shared contracts; inspect the current branch before assuming support
-
 A Python test port follows the source setup, assertions and parameterized scenarios through the Rust adapter's actual inputs and caller. Map behavior rather than helper names or collection counts
 
 Test private helpers inline at the owning file's end. Public-only tests belong in the owning crate's `tests/<subject>.rs`. Use named `rstest` cases and typed injected fixtures. Keep a fixture focused on setup and assertions about one result together
